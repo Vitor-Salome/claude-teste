@@ -1,0 +1,94 @@
+name: Relatório semanal Mercado Livre
+
+on:
+  schedule:
+    # Toda segunda-feira às 08:00 no horário de Brasília (11:00 UTC)
+    - cron: "0 11 * * 1"
+  workflow_dispatch:   # permite rodar manualmente pela aba Actions
+    inputs:
+      semanas_atras:
+        description: "1 = última semana fechada, 2 = a anterior..."
+        default: "1"
+      publicar:
+        description: "Publicar os posts no Instagram/Facebook? (senão só gera e envia por e-mail)"
+        type: boolean
+        default: false
+
+# Nunca rodar duas execuções ao mesmo tempo: o refresh token do ML é de uso único
+concurrency:
+  group: relatorio-ml
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  relatorio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ML_APP_ID: ${{ secrets.ML_APP_ID }}
+      ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+      ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+      ML_REFRESH_TOKEN: ${{ secrets.ML_REFRESH_TOKEN }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
+      SEMANAS_ATRAS: ${{ github.event.inputs.semanas_atras || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gerar relatório, posts e enviar e-mail
+        run: |
+          python relatorio_semanal_ml.py \
+            --semanas-atras "$SEMANAS_ATRAS" \
+            --custos custos.csv \
+            --posts \
+            --saida relatorios \
+            --email "$EMAIL_DESTINO"
+
+      # Publicação automática. Só roda se você pedir:
+      #  - execução manual com a caixa "Publicar" marcada, OU
+      #  - variável do repositório PUBLICAR_POSTS = true (Settings > Variables) para a rotina semanal.
+      - name: Publicar posts no Instagram/Facebook
+        if: ${{ github.event.inputs.publicar == 'true' || vars.PUBLICAR_POSTS == 'true' }}
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+        run: |
+          ARQ=$(ls -t relatorios/posts_*.json | head -1)
+          echo "Publicando $ARQ"
+          python postar_redes.py "$ARQ" --publicar
+
+      # O refresh token muda a cada uso. Este passo roda SEMPRE (mesmo se o anterior
+      # falhar depois de renovar o token), senão a próxima execução quebra.
+      - name: Salvar o novo refresh token no secret
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -f tokens.json ]; then
+            NOVO=$(python -c "import json; print(json.load(open('tokens.json'))['refresh_token'])")
+            echo "::add-mask::$NOVO"
+            printf '%s' "$NOVO" | gh secret set ML_REFRESH_TOKEN --repo "$GITHUB_REPOSITORY"
+            echo "Refresh token atualizado."
+          else
+            echo "tokens.json não foi gerado (a renovação não aconteceu); nada a atualizar."
+          fi
+
+      - name: Guardar relatórios (baixar pela aba Actions)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios
+          path: relatorios/
+          retention-days: 30
+          if-no-files-found: ignore
