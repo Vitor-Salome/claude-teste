@@ -17,13 +17,20 @@ custos.csv                  <- edite com seus produtos
 
 Importante: privado, porque o `custos.csv` mostra suas margens.
 
-## Passo 2: autorizar o app do ML (uma vez, no seu computador)
+## Passo 2: autorizar o app do ML (uma vez, sem terminal)
 
-Siga o passo "CONFIGURAÇÃO" no topo do script e rode `python3 relatorio_semanal_ml.py --auth TG-xxxx`.
-Isso cria o `tokens.json`. Abra-o e copie o valor de `refresh_token`.
+1. Cadastre antes os secrets `ML_APP_ID`, `ML_CLIENT_SECRET`, `ML_REDIRECT_URI` e `GH_PAT` (Passos 3 e 4).
+2. Abra no navegador (troque APP_ID e a URI pelos seus):
+   `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=APP_ID&redirect_uri=URI`
+3. Aceite. O navegador vai para a URI de redirecionamento (a página pode dar erro, é normal).
+   Copie da barra de endereço o valor depois de `code=` (começa com `TG-`).
+4. Em **Actions > Autorizar Mercado Livre (rodar uma vez) > Run workflow**, cole o código e rode.
+   O workflow troca o código pelo token e o guarda sozinho no secret `ML_REFRESH_TOKEN`.
+   O código vale poucos minutos e só uma vez: faça os passos 2 a 4 em sequência.
 
-**Atenção:** depois de copiar, NÃO rode o script localmente de novo com esse mesmo token.
-Ele é de uso único. Se rodar, o token do secret fica inválido e você precisa refazer o `--auth`.
+Alternativa pelo seu computador: `python3 relatorio_semanal_ml.py --auth TG-xxxx` cria o `tokens.json`;
+copie o `refresh_token` para o secret. Depois disso NÃO rode o script localmente de novo com esse token
+(ele é de uso único).
 
 ## Passo 3: criar o token do GitHub (GH_PAT)
 

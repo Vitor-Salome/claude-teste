@@ -1,0 +1,49 @@
+name: Autorizar Mercado Livre (rodar uma vez)
+
+# Troca o código de autorização do Mercado Livre pelo refresh token e o guarda
+# no secret ML_REFRESH_TOKEN, sem precisar rodar nada no seu computador.
+# O código vale poucos minutos e só pode ser usado uma vez: gere e use em seguida.
+
+on:
+  workflow_dispatch:
+    inputs:
+      codigo:
+        description: "Código TG-... que aparece na URL depois de autorizar no Mercado Livre"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relatorio-ml
+  cancel-in-progress: false
+
+jobs:
+  autorizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ML_APP_ID: ${{ secrets.ML_APP_ID }}
+      ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+      ML_REDIRECT_URI: ${{ secrets.ML_REDIRECT_URI }}
+      CODIGO: ${{ github.event.inputs.codigo }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Trocar o código por tokens
+        run: python relatorio_semanal_ml.py --auth "$CODIGO"
+
+      - name: Guardar o refresh token no secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          NOVO=$(python -c "import json; print(json.load(open('tokens.json'))['refresh_token'])")
+          echo "::add-mask::$NOVO"
+          printf '%s' "$NOVO" | gh secret set ML_REFRESH_TOKEN --repo "$GITHUB_REPOSITORY"
+          rm -f tokens.json
+          echo "Pronto: ML_REFRESH_TOKEN atualizado. Agora rode o workflow 'Relatório semanal Mercado Livre'."
