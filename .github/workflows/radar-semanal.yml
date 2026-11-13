@@ -1,0 +1,77 @@
+name: Radar semanal de mercado (Mercado Livre)
+
+on:
+  schedule:
+    # Toda segunda-feira às 08:00 no horário de Brasília (11:00 UTC)
+    - cron: "0 11 * * 1"
+  workflow_dispatch:   # rodar manualmente pela aba Actions
+    inputs:
+      nivel:
+        description: "1 = categorias principais, 2 = subcategorias (nichos, mais demorado)"
+        type: choice
+        options: ["1", "2"]
+        default: "1"
+      categorias:
+        description: "Opcional: IDs de categorias separados por vírgula (ex.: MLB1055,MLB1648)"
+        required: false
+        default: ""
+
+# Uma execução por vez (o histórico semanal é gravado no repositório)
+concurrency:
+  group: radar-ml
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # só para gravar o histórico semanal em dados/
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ML_APP_ID: ${{ secrets.ML_APP_ID }}
+      ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_DESTINO: ${{ secrets.EMAIL_DESTINO }}
+      NIVEL: ${{ github.event.inputs.nivel || vars.RADAR_NIVEL || '1' }}
+      CATEGORIAS: ${{ github.event.inputs.categorias || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gerar o radar e enviar por e-mail
+        run: |
+          ARGS=(--nivel "$NIVEL" --saida relatorios --dados dados)
+          if [ -n "$CATEGORIAS" ]; then ARGS+=(--categorias "$CATEGORIAS"); fi
+          if [ -n "$EMAIL_DESTINO" ]; then ARGS+=(--email "$EMAIL_DESTINO"); fi
+          python radar_mercado_ml.py "${ARGS[@]}"
+
+      # Guarda o ranking desta semana para comparar com a próxima
+      - name: Gravar histórico semanal
+        if: always()
+        run: |
+          git config user.name "radar-bot"
+          git config user.email "radar-bot@users.noreply.github.com"
+          git add dados/
+          if git diff --cached --quiet; then
+            echo "Nada novo para gravar."
+          else
+            git commit -m "Histórico semanal do radar"
+            git push
+          fi
+
+      - name: Guardar relatórios (baixar pela aba Actions)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: radar
+          path: relatorios/
+          retention-days: 30
+          if-no-files-found: ignore
